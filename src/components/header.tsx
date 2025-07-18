@@ -35,7 +35,7 @@ export function Header() {
           <SynamicLogo className="h-8 w-8 mr-2" />
           <h1 className="text-xl font-bold font-headline text-primary">Synamic</h1>
         </div>
-        <div className="flex flex-1 items-center justify-end space-x-2">
+        <div className="flex flex-1 items-center justify-end space-x-2 mr-4">
           {user && (
             <nav className="flex items-center">
               <DropdownMenu>
