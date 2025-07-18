@@ -1,14 +1,14 @@
+
 "use client";
 
-import { useState, useActionState, useTransition } from "react";
-import { useFormStatus } from "react-dom";
+import { useState, useTransition } from "react";
 import {
   handleAssessPriority,
   handleGenerateSchedule,
   handleReworkSchedule,
 } from "@/lib/actions";
 import type { ScheduleTask } from "@/lib/types";
-import { type PriorityItem } from "@/ai/flows/assess-priority";
+import type { PriorityItem } from "@/ai/flows/assess-priority";
 
 import {
   DndContext,
@@ -51,8 +51,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Header } from "./header";
 
-function SubmitButton({ text, loadingText, icon: Icon = Sparkles }: { text: string; loadingText: string, icon?: React.ElementType }) {
-  const { pending } = useFormStatus();
+function SubmitButton({ text, loadingText, icon: Icon = Sparkles, pending }: { text: string; loadingText: string, icon?: React.ElementType, pending: boolean }) {
   return (
     <Button type="submit" disabled={pending} size="lg" className="w-full sm:w-auto">
       {pending ? (
@@ -122,6 +121,8 @@ function SortablePriorityItem({ item }: { item: PriorityItem }) {
 
 export function Dashboard() {
   const { toast } = useToast();
+  const [isPending, startTransition] = useTransition();
+
   const [priorities, setPriorities] = useState<PriorityItem[]>([]);
   const [reasoning, setReasoning] = useState<string>("");
   const [schedule, setSchedule] = useState<ScheduleTask[]>([]);
@@ -130,19 +131,22 @@ export function Dashboard() {
   
   const sensors = useSensors(useSensor(PointerSensor));
 
-  const onAssess = async (formData: FormData) => {
-    const result = await handleAssessPriority(formData);
-    if(result.error) {
-       toast({
-        variant: "destructive",
-        title: "Error Assessing Priorities",
-        description: "Please check your input and try again.",
-      });
-    } else if (result.data) {
-      setPriorities(result.data.priorityList);
-      setReasoning(result.data.reasoning);
-      setSchedule([]);
-    }
+  const onAssess = (formData: FormData) => {
+    startTransition(async () => {
+      const result = await handleAssessPriority({ userGoals: formData.get('userGoals') as string });
+      if (result.error) {
+        toast({
+          variant: "destructive",
+          title: "Error Assessing Priorities",
+          description: Object.values(result.error).flat().join('\n') || "Please check your input and try again.",
+        });
+      } else if (result.data) {
+        setPriorities(result.data.priorityList);
+        setReasoning(result.data.reasoning);
+        setSchedule([]);
+        setReworkedSchedule(null);
+      }
+    });
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -186,22 +190,32 @@ export function Dashboard() {
     setIsGenerating(false);
   };
 
-  const onRework = async (formData: FormData) => {
-    const result = await handleReworkSchedule(formData);
-     if (result.error) {
-       toast({
-        variant: "destructive",
-        title: "Error Reworking Schedule",
-        description: "Please check your input and try again.",
-      });
-      setReworkedSchedule(null);
-    } else if (result.data) {
-      setReworkedSchedule(result.data);
-       toast({
-        title: "Schedule Reworked!",
-        description: "Your new schedule is ready.",
-      });
-    }
+  const onRework = (formData: FormData) => {
+    startTransition(async () => {
+        const input = {
+            originalSchedule: formData.get("originalSchedule") as string,
+            completedTasks: (formData.get("completedTasks") as string).split(',').map(s => s.trim()).filter(Boolean),
+            remainingTime: formData.get("remainingTime") as string,
+            newConstraints: formData.get("newConstraints") as string,
+            userGoals: formData.get("userGoals") as string,
+        };
+        
+        const result = await handleReworkSchedule(input);
+        if (result.error) {
+            toast({
+                variant: "destructive",
+                title: "Error Reworking Schedule",
+                description: Object.values(result.error).flat().join('\n') || "Please check your input and try again.",
+            });
+            setReworkedSchedule(null);
+        } else if (result.data) {
+            setReworkedSchedule(result.data);
+            toast({
+                title: "Schedule Reworked!",
+                description: "Your new schedule is ready.",
+            });
+        }
+    });
   }
 
   const resetAll = () => {
@@ -232,8 +246,8 @@ export function Dashboard() {
                 />
               </CardContent>
               <CardFooter className="flex-col sm:flex-row gap-4 items-start">
-                 <SubmitButton text="Assess Priorities" loadingText="Assessing..." icon={Send} />
-                 <Button variant="ghost" onClick={resetAll}>
+                 <SubmitButton text="Assess Priorities" loadingText="Assessing..." icon={Send} pending={isPending} />
+                 <Button type="button" variant="ghost" onClick={resetAll}>
                     <RefreshCw className="mr-2 h-4 w-4"/> Start Over
                 </Button>
               </CardFooter>
@@ -346,7 +360,7 @@ export function Dashboard() {
                         </div>
                     </CardContent>
                     <CardFooter>
-                        <SubmitButton text="Rework My Day" loadingText="Reworking..." icon={RefreshCw} />
+                        <SubmitButton text="Rework My Day" loadingText="Reworking..." icon={RefreshCw} pending={isPending}/>
                     </CardFooter>
                 </form>
             </Card>
