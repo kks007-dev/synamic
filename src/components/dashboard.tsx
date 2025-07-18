@@ -71,23 +71,43 @@ function SubmitButton({ text, loadingText, icon: Icon = Sparkles, pending }: { t
 }
 
 function parseSchedule(scheduleText: string): ScheduleTask[] {
-  if (!scheduleText) return [];
-  const lines = scheduleText.split('\n').filter(line => line.trim().length > 0);
-  const tasks: ScheduleTask[] = [];
-
-  for (const line of lines) {
-    const match = line.match(/(\d{1,2}:\d{2}\s?[AP]M)\s?-\s?(\d{1,2}:\d{2}\s?[AP]M):\s*(.*)/);
-    if (match) {
-      const [, startTime, endTime, task] = match;
-      tasks.push({
-        time: `${startTime} - ${endTime}`,
-        task: task.trim(),
-        startTime: startTime.trim(),
-        endTime: endTime.trim(),
-      });
+    if (!scheduleText) return [];
+    
+    // Attempt to parse as JSON array first
+    try {
+        const tasks = JSON.parse(scheduleText.replace(/,\s*]/g, ']')); // Tolerate trailing commas
+        if (Array.isArray(tasks)) {
+             return tasks.map(t => {
+                const [startTime, endTime] = t.time?.split(' - ').map((s: string) => s.trim()) || [null, null];
+                return {
+                    time: t.time || 'N/A',
+                    task: t.task || 'Untitled Task',
+                    startTime: startTime,
+                    endTime: endTime,
+                    duration: t.duration
+                };
+            });
+        }
+    } catch (e) {
+        // Fallback to line-by-line parsing if JSON fails
     }
-  }
-  return tasks;
+
+    const lines = scheduleText.split('\n').filter(line => line.trim().length > 0);
+    const tasks: ScheduleTask[] = [];
+
+    for (const line of lines) {
+        const match = line.match(/(\d{1,2}:\d{2}\s?[AP]M)\s?-\s?(\d{1,2}:\d{2}\s?[AP]M):\s*(.*)/);
+        if (match) {
+            const [, startTime, endTime, task] = match;
+            tasks.push({
+                time: `${startTime} - ${endTime}`,
+                task: task.trim(),
+                startTime: startTime.trim(),
+                endTime: endTime.trim(),
+            });
+        }
+    }
+    return tasks;
 }
 
 
@@ -295,12 +315,13 @@ export function Dashboard() {
           title: task.task,
           startTime: task.startTime!,
           endTime: task.endTime!,
-      }));
+      })).filter(t => t.startTime && t.endTime);
 
       if (tasksToSync.length === 0) {
-          toast({ variant: "destructive", title: "No schedule to sync." });
+          toast({ variant: "destructive", title: "No valid schedule events to sync." });
           return;
       }
+      
       setIsSyncing(true);
       const result = await handleSyncToCalendar({ events: tasksToSync });
       if (result.error) {
@@ -321,10 +342,11 @@ export function Dashboard() {
   const onRework = (formData: FormData) => {
     startReworkTransition(async () => {
         const newConstraints = formData.get("newConstraints") as string;
+        const currentScheduleText = parseSchedule(scheduleText).map(t => `${t.time}: ${t.task}`).join('\n');
 
         const input = {
-            originalSchedule: scheduleText,
-            completedTasks: [], // We let the AI figure this out from the edited schedule
+            originalSchedule: currentScheduleText,
+            completedTasks: [], // We let the AI figure this out
             remainingTime: "the rest of the day", // Let AI determine this
             newConstraints: newConstraints,
             userGoals: userGoals,

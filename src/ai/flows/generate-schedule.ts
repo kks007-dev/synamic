@@ -1,3 +1,4 @@
+
 // src/ai/flows/generate-schedule.ts
 'use server';
 
@@ -35,7 +36,7 @@ const GenerateScheduleInputSchema = z.object({
 export type GenerateScheduleInput = z.infer<typeof GenerateScheduleInputSchema>;
 
 const GenerateScheduleOutputSchema = z.object({
-  schedule: z.string().describe('The generated daily schedule.'),
+  schedule: z.string().describe('The generated daily schedule as a JSON string array. Each item should be an object with "time", "task", and "duration" properties.'),
 });
 export type GenerateScheduleOutput = z.infer<typeof GenerateScheduleOutputSchema>;
 
@@ -51,6 +52,8 @@ const prompt = ai.definePrompt({
   output: {schema: GenerateScheduleOutputSchema},
   prompt: `You are an AI assistant designed to generate an optimized daily schedule for users.
 
+  Your output MUST be a valid JSON array of objects. Each object in the array represents a scheduled task and must have the following properties: "time" (e.g., "1:00 PM - 2:30 PM"), "task" (a string describing the activity), and "duration" (e.g. "1.5 hours"). Do not output anything other than the JSON array.
+
   Consider the user's utmost priority, calendar events, and any learning or other goals.
   Create a schedule that balances productivity and personal growth.
   The schedule should be framed by the provided start and end times. If not provided, assume a standard 9 AM to 6 PM workday.
@@ -62,7 +65,7 @@ const prompt = ai.definePrompt({
   Learning Goal: {{{learningGoal}}}
   Other Goals: {{{otherGoals}}}
 
-  Please provide a detailed schedule for the day as a list of items.
+  Please provide a detailed schedule for the day as a JSON array of objects.
   Each item in the schedule must have a specific time slot (e.g., "1:00 PM - 2:30 PM").
   The schedule should be realistic and account for breaks and transitions between activities.
   The schedule must also indicate the duration of each task.
