@@ -29,6 +29,8 @@ const GenerateScheduleInputSchema = z.object({
     .string()
     .optional()
     .describe('Any other goals the user wants to achieve during the day.'),
+  startTime: z.string().optional().describe('The optional start time for the schedule (e.g., "9:00 AM").'),
+  endTime: z.string().optional().describe('The optional end time for the schedule (e.g., "6:00 PM").'),
 });
 export type GenerateScheduleInput = z.infer<typeof GenerateScheduleInputSchema>;
 
@@ -51,13 +53,17 @@ const prompt = ai.definePrompt({
 
   Consider the user's utmost priority, calendar events, and any learning or other goals.
   Create a schedule that balances productivity and personal growth.
+  The schedule should be framed by the provided start and end times. If not provided, assume a standard 9 AM to 6 PM workday.
 
   User Priority: {{{priority}}}
   Calendar Events: {{{calendarEvents}}}
+  {{#if startTime}}Start Time: {{{startTime}}}{{/if}}
+  {{#if endTime}}End Time: {{{endTime}}}{{/if}}
   Learning Goal: {{{learningGoal}}}
   Other Goals: {{{otherGoals}}}
 
-  Please provide a detailed schedule for the day.
+  Please provide a detailed schedule for the day as a list.
+  Each item in the schedule must have a specific time slot (e.g., "1:00 PM - 2:30 PM").
   The schedule should be realistic and account for breaks and transitions between activities.
   The schedule should also indicate the duration of each task.
   Do not deviate from the priority that the user provides.

@@ -123,6 +123,10 @@ export function Dashboard() {
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
 
+  const [userGoals, setUserGoals] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  
   const [priorities, setPriorities] = useState<PriorityItem[]>([]);
   const [reasoning, setReasoning] = useState<string>("");
   const [schedule, setSchedule] = useState<ScheduleTask[]>([]);
@@ -133,7 +137,12 @@ export function Dashboard() {
 
   const onAssess = (formData: FormData) => {
     startTransition(async () => {
-      const result = await handleAssessPriority({ userGoals: formData.get('userGoals') as string });
+      const goals = formData.get('userGoals') as string;
+      setUserGoals(goals);
+      setStartTime(formData.get('startTime') as string);
+      setEndTime(formData.get('endTime') as string);
+
+      const result = await handleAssessPriority({ userGoals: goals });
       if (result.error) {
         toast({
           variant: "destructive",
@@ -176,6 +185,8 @@ export function Dashboard() {
     const input = {
       priority: priorityText,
       calendarEvents: "Team Standup at 10:00 AM - 11:00 AM, Project Sync at 5:00 PM - 6:00 PM",
+      startTime: startTime,
+      endTime: endTime,
     };
     const result = await handleGenerateSchedule(input);
     if (result.error) {
@@ -219,6 +230,9 @@ export function Dashboard() {
   }
 
   const resetAll = () => {
+    setUserGoals("");
+    setStartTime("");
+    setEndTime("");
     setPriorities([]);
     setReasoning("");
     setSchedule([]);
@@ -237,13 +251,24 @@ export function Dashboard() {
               <CardDescription className="text-lg">Tell the AI what you want to achieve to get a prioritized list. The more detail, the better.</CardDescription>
             </CardHeader>
             <form action={onAssess}>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <Textarea
                   name="userGoals"
                   placeholder="e.g., Finish the Q3 report, prepare for the client presentation, learn a new chapter on React, and go for a run..."
                   className="min-h-[120px] text-base"
                   required
+                  defaultValue={userGoals}
                 />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <Label htmlFor="startTime">Start Time (Optional)</Label>
+                        <Input id="startTime" name="startTime" type="text" placeholder="e.g., 9:00 AM" defaultValue={startTime} />
+                    </div>
+                    <div>
+                        <Label htmlFor="endTime">End Time (Optional)</Label>
+                        <Input id="endTime" name="endTime" type="text" placeholder="e.g., 5:00 PM" defaultValue={endTime} />
+                    </div>
+                </div>
               </CardContent>
               <CardFooter className="flex-col sm:flex-row gap-4 items-start">
                  <SubmitButton text="Assess Priorities" loadingText="Assessing..." icon={Send} pending={isPending} />

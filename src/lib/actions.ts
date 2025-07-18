@@ -29,6 +29,8 @@ export async function handleAssessPriority(input: AssessPriorityInput): Promise<
 const generateScheduleSchema = z.object({
   priority: z.string().min(3, "Please select a valid priority."),
   calendarEvents: z.string(),
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
   learningGoal: z.string().optional(),
   otherGoals: z.string().optional(),
 });
