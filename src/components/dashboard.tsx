@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useFormState, useFormStatus } from "react-dom";
+import { useState, useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import {
   handleAssessPriority,
   handleGenerateSchedule,
@@ -87,8 +87,8 @@ export function Dashboard() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [reworkedSchedule, setReworkedSchedule] = useState<{revisedSchedule: string; reasoning: string} | null>(null);
 
-  const [assessState, assessAction] = useFormState(handleAssessPriority, undefined);
-  const [reworkState, reworkAction] = useFormState(handleReworkSchedule, undefined);
+  const [assessState, assessAction] = useActionState(handleAssessPriority, undefined);
+  const [reworkState, reworkAction] = useActionState(handleReworkSchedule, undefined);
   
   const onAssess = async (formData: FormData) => {
     const result = await handleAssessPriority(formData);
