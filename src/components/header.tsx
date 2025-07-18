@@ -16,7 +16,8 @@ export function Header() {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-14 max-w-screen-2xl items-center">
-        <div className="mr-4 flex items-center">
+        <div className="flex-1"></div>
+        <div className="flex flex-1 items-center justify-center">
           <SynamicLogo className="h-8 w-8 mr-2" />
           <h1 className="text-xl font-bold font-headline text-primary">Synamic</h1>
         </div>
