@@ -78,9 +78,16 @@ export async function handleReworkSchedule(input: DynamicallyReworkScheduleInput
   }
 }
 
-const syncToCalendarSchema = z.object({
-    schedule: z.string().min(1, "A schedule is required to sync."),
+const eventSchema = z.object({
+    title: z.string(),
+    startTime: z.string(),
+    endTime: z.string(),
 });
+
+const syncToCalendarSchema = z.object({
+    events: z.array(eventSchema).min(1, "At least one event is required to sync."),
+});
+
 
 export async function handleSyncToCalendar(input: Omit<SyncWithGoogleCalendarInput, 'oauthToken'>): Promise<{ data?: SyncWithGoogleCalendarOutput, error?: string }> {
     const validation = syncToCalendarSchema.safeParse(input);

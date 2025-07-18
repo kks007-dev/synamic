@@ -280,19 +280,25 @@ export function Dashboard() {
           try {
             const provider = new GoogleAuthProvider();
             await signInWithPopup(auth, provider);
-            toast({ title: "Google Sign-In Successful!", description: "You can now sync your calendar." });
+            toast({ title: "Google Sign-In Successful!", description: "You can now try syncing your calendar again." });
           } catch (error: any) {
             toast({ variant: "destructive", title: "Google Sign-In Failed", description: error.message });
           }
           return;
       }
+      
+      const tasksToSync = parseSchedule(scheduleText).map(task => ({
+          title: task.task,
+          startTime: task.startTime!,
+          endTime: task.endTime!,
+      }));
 
-      if (!scheduleText) {
+      if (tasksToSync.length === 0) {
           toast({ variant: "destructive", title: "No schedule to sync." });
           return;
       }
       setIsSyncing(true);
-      const result = await handleSyncToCalendar({ schedule: scheduleText });
+      const result = await handleSyncToCalendar({ events: tasksToSync });
       if (result.error) {
            toast({
               variant: "destructive",

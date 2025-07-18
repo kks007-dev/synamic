@@ -10,8 +10,9 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import {parse} from 'date-fns';
 
-// Placeholder for a real Google Calendar API client
+// This tool represents the action of creating an event in a user's Google Calendar.
 const createCalendarEvent = ai.defineTool(
     {
         name: 'createCalendarEvent',
@@ -35,9 +36,14 @@ const createCalendarEvent = ai.defineTool(
     }
 );
 
+const EventSchema = z.object({
+    title: z.string(),
+    startTime: z.string(),
+    endTime: z.string(),
+});
 
 const SyncWithGoogleCalendarInputSchema = z.object({
-    schedule: z.string().describe('The full text of the schedule to be synced.'),
+    events: z.array(EventSchema).describe("A list of events to be synced to the calendar."),
     oauthToken: z.string().describe("The user's OAuth token for Google Calendar API access."),
 });
 export type SyncWithGoogleCalendarInput = z.infer<typeof SyncWithGoogleCalendarInputSchema>;
@@ -58,13 +64,12 @@ export async function syncWithGoogleCalendar(input: SyncWithGoogleCalendarInput)
 }
 
 
-const systemPrompt = `You are an assistant that processes a user's daily schedule and creates corresponding events in their Google Calendar using the provided tools.
-
-The user's schedule is provided below. Parse each line to identify the task title, start time, and end time.
-Today's date is ${new Date().toDateString()}. Use this to construct full ISO 8601 timestamps for each event.
-
-For each valid task in the schedule, call the \`createCalendarEvent\` tool with the correct parameters.`;
-
+function convertToISO(timeStr: string): string {
+    const now = new Date();
+    // Use date-fns to parse the "h:mm a" format robustly
+    const date = parse(timeStr, 'h:mm a', now);
+    return date.toISOString();
+}
 
 const syncWithGoogleCalendarFlow = ai.defineFlow(
     {
@@ -73,51 +78,34 @@ const syncWithGoogleCalendarFlow = ai.defineFlow(
         outputSchema: SyncWithGoogleCalendarOutputSchema,
     },
     async (input) => {
-        const {history} = await ai.generate({
-            model: 'googleai/gemini-1.5-flash-latest',
-            system: systemPrompt,
-            prompt: `Schedule:\n${input.schedule}`,
-            tools: [createCalendarEvent],
-        });
-        
-        const lastMessage = history[history.length - 1];
-
-        if (!lastMessage?.content) {
-            throw new Error("The AI failed to process the schedule for calendar sync.");
-        }
-
         const syncedEvents: any[] = [];
         const errors: string[] = [];
 
-        // Filter for tool responses in the last message's content
-        const toolResponses = lastMessage.content.filter(part => part.toolResponse);
-
-        if (toolResponses.length > 0) {
-            toolResponses.forEach(part => {
-                if (part.toolResponse) {
-                    const toolRequest = history
-                        .flatMap(h => h.content)
-                        .find(c => c.toolRequest?.id === part.toolResponse?.id);
-
-                    if (part.toolResponse.result.success && toolRequest?.toolRequest) {
-                        syncedEvents.push({
-                            title: toolRequest.toolRequest.input.title,
-                            startTime: toolRequest.toolRequest.input.startTime,
-                            endTime: toolRequest.toolRequest.input.endTime,
-                            eventId: part.toolResponse.result.eventId,
-                        });
-                    } else {
-                        errors.push(`Failed to create event for "${toolRequest?.toolRequest?.input?.title || 'an unknown task'}".`);
-                    }
+        for (const event of input.events) {
+            try {
+                const result = await createCalendarEvent({
+                    title: event.title,
+                    startTime: convertToISO(event.startTime),
+                    endTime: convertToISO(event.endTime),
+                });
+                
+                if (result.success) {
+                    syncedEvents.push({
+                        title: event.title,
+                        startTime: event.startTime,
+                        endTime: event.endTime,
+                        eventId: result.eventId,
+                    });
+                } else {
+                     errors.push(`Failed to create event for "${event.title}".`);
                 }
-            });
+
+            } catch(e: any) {
+                console.error(`Error processing event: ${event.title}`, e);
+                errors.push(`An error occurred while creating the event: "${event.title}".`);
+            }
         }
-
-
-        if (syncedEvents.length === 0 && errors.length === 0) {
-             errors.push("Could not parse any valid events from the provided schedule text. The AI might not have found any tasks to schedule.");
-        }
-
+        
         return {
             syncedEvents,
             errors,
