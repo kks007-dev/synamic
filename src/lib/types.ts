@@ -3,8 +3,3 @@ export interface ScheduleTask {
   task: string;
   duration?: string;
 }
-
-export type Priority = {
-  id: string;
-  text: string;
-};
