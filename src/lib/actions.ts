@@ -8,14 +8,6 @@ import { dynamicallyReworkSchedule, DynamicallyReworkScheduleInput, DynamicallyR
 import { syncWithGoogleCalendar, SyncWithGoogleCalendarInput, SyncWithGoogleCalendarOutput } from "@/ai/flows/sync-with-google-calendar";
 import { headers } from "next/headers";
 
-async function getUserIdToken(): Promise<string> {
-    const authorization = headers().get("Authorization");
-    if (authorization?.startsWith("Bearer ")) {
-        return authorization.substring(7);
-    }
-    throw new Error("User not authenticated.");
-}
-
 
 const assessPrioritySchema = z.object({
   userGoals: z.string().min(10, "Please describe your goals in a bit more detail."),
@@ -98,19 +90,17 @@ const syncToCalendarSchema = z.object({
 });
 
 
-export async function handleSyncToCalendar(input: { events: z.infer<typeof eventSchema>[] }): Promise<{ data?: SyncWithGoogleCalendarOutput, error?: string }> {
-    const validation = syncToCalendarSchema.safeParse(input);
+export async function handleSyncToCalendar(input: { events: z.infer<typeof eventSchema>[], accessToken: string }): Promise<{ data?: SyncWithGoogleCalendarOutput, error?: string }> {
+    const validation = syncToCalendarSchema.safeParse({ events: input.events });
     
     if (!validation.success) {
         return { error: "Invalid input for calendar sync." };
     }
 
     try {
-        const idToken = await getUserIdToken();
-
         const output = await syncWithGoogleCalendar({
             ...validation.data,
-            idToken: idToken, 
+            accessToken: input.accessToken, // Use the Google OAuth access token
         });
         if (output.errors.length > 0) {
             return { error: output.errors.join(', ') };

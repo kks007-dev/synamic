@@ -7,7 +7,9 @@ if (!admin.apps.length) {
 
   if (serviceAccountString) {
     try {
-      const serviceAccount = JSON.parse(serviceAccountString);
+      // Fix for escaped newlines in .env files
+      const fixed = serviceAccountString.replace(/\\n/g, '\n');
+      const serviceAccount = JSON.parse(fixed);
       app = admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
