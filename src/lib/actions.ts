@@ -5,6 +5,8 @@ import { z } from "zod";
 import { assessPriority, AssessPriorityInput, AssessPriorityOutput } from "@/ai/flows/assess-priority";
 import { generateSchedule, GenerateScheduleInput, GenerateScheduleOutput } from "@/ai/flows/generate-schedule";
 import { dynamicallyReworkSchedule, DynamicallyReworkScheduleInput, DynamicallyReworkScheduleOutput } from "@/ai/flows/dynamically-rework-schedule";
+import { syncWithGoogleCalendar, SyncWithGoogleCalendarInput, SyncWithGoogleCalendarOutput } from "@/ai/flows/sync-with-google-calendar";
+import { auth } from "@/lib/firebase-admin";
 
 const assessPrioritySchema = z.object({
   userGoals: z.string().min(10, "Please describe your goals in a bit more detail."),
@@ -79,4 +81,32 @@ export async function handleReworkSchedule(input: DynamicallyReworkScheduleInput
     console.error("Error reworking schedule:", e);
     return { error: { _form: [e.message || "An unexpected error occurred while reworking the schedule."] }};
   }
+}
+
+const syncToCalendarSchema = z.object({
+    schedule: z.string().min(1, "A schedule is required to sync."),
+});
+
+export async function handleSyncToCalendar(input: SyncWithGoogleCalendarInput): Promise<{ data?: SyncWithGoogleCalendarOutput, error?: string }> {
+    const validation = syncToCalendarSchema.safeParse(input);
+
+    if (!validation.success) {
+        return { error: "Invalid input for calendar sync." };
+    }
+
+    try {
+        // Here you would typically get the user's OAuth token for Google Calendar.
+        // For this example, we'll pass a placeholder. In a real app, this
+        // would be securely retrieved after the user authenticates.
+        const output = await syncWithGoogleCalendar({
+            ...validation.data,
+            // This is a placeholder and will need to be replaced with a real token
+            // obtained from the user's Google Sign-In session.
+            oauthToken: "USER_OAUTH_TOKEN_PLACEHOLDER",
+        });
+        return { data: output };
+    } catch (e: any) {
+        console.error("Error syncing to Google Calendar:", e);
+        return { error: e.message || "Failed to sync to Google Calendar." };
+    }
 }

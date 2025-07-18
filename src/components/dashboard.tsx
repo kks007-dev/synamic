@@ -1,14 +1,17 @@
 
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useActionState } from "react";
 import {
   handleAssessPriority,
   handleGenerateSchedule,
   handleReworkSchedule,
+  handleSyncToCalendar,
 } from "@/lib/actions";
 import type { ScheduleTask } from "@/lib/types";
 import type { PriorityItem } from "@/ai/flows/assess-priority";
+import { useAuth } from "@/components/auth-provider";
+
 
 import {
   DndContext,
@@ -121,7 +124,8 @@ function SortablePriorityItem({ item }: { item: PriorityItem }) {
 
 export function Dashboard() {
   const { toast } = useToast();
-  const [isPending, startTransition] = useTransition();
+  const [isAssessPending, startAssessTransition] = useTransition();
+  const [isReworkPending, startReworkTransition] = useTransition();
 
   const [userGoals, setUserGoals] = useState("");
   const [startTime, setStartTime] = useState("");
@@ -130,13 +134,16 @@ export function Dashboard() {
   const [priorities, setPriorities] = useState<PriorityItem[]>([]);
   const [reasoning, setReasoning] = useState<string>("");
   const [schedule, setSchedule] = useState<ScheduleTask[]>([]);
+  const [scheduleText, setScheduleText] = useState<string>("");
+
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [reworkedSchedule, setReworkedSchedule] = useState<{revisedSchedule: string; reasoning: string} | null>(null);
   
   const sensors = useSensors(useSensor(PointerSensor));
 
   const onAssess = (formData: FormData) => {
-    startTransition(async () => {
+    startAssessTransition(async () => {
       const goals = formData.get('userGoals') as string;
       setUserGoals(goals);
       setStartTime(formData.get('startTime') as string);
@@ -180,7 +187,8 @@ export function Dashboard() {
     }
     setIsGenerating(true);
     setSchedule([]);
-    // Use the reordered priorities
+    setScheduleText("");
+    setReworkedSchedule(null);
     const priorityText = priorities.map(p => p.text).join(', ');
     const input = {
       priority: priorityText,
@@ -196,13 +204,36 @@ export function Dashboard() {
         description: result.error,
       });
     } else if (result.data) {
+      setScheduleText(result.data.schedule);
       setSchedule(parseSchedule(result.data.schedule));
     }
     setIsGenerating(false);
   };
+  
+  const onSync = async () => {
+      if (!scheduleText) {
+          toast({ variant: "destructive", title: "No schedule to sync." });
+          return;
+      }
+      setIsSyncing(true);
+      const result = await handleSyncToCalendar({ schedule: scheduleText });
+      if (result.error) {
+           toast({
+              variant: "destructive",
+              title: "Error Syncing to Calendar",
+              description: result.error,
+           });
+      } else {
+          toast({
+              title: "Synced Successfully!",
+              description: "Your schedule has been added to your Google Calendar.",
+          });
+      }
+      setIsSyncing(false);
+  }
 
   const onRework = (formData: FormData) => {
-    startTransition(async () => {
+    startReworkTransition(async () => {
         const input = {
             originalSchedule: formData.get("originalSchedule") as string,
             completedTasks: (formData.get("completedTasks") as string).split(',').map(s => s.trim()).filter(Boolean),
@@ -221,6 +252,8 @@ export function Dashboard() {
             setReworkedSchedule(null);
         } else if (result.data) {
             setReworkedSchedule(result.data);
+            setSchedule(parseSchedule(result.data.revisedSchedule));
+            setScheduleText(result.data.revisedSchedule);
             toast({
                 title: "Schedule Reworked!",
                 description: "Your new schedule is ready.",
@@ -236,14 +269,16 @@ export function Dashboard() {
     setPriorities([]);
     setReasoning("");
     setSchedule([]);
+    setScheduleText("");
     setReworkedSchedule(null);
   };
+
+  const hasGeneratedSchedule = schedule.length > 0 || isGenerating;
 
   return (
     <>
       <Header />
       <div className="container max-w-screen-lg mx-auto p-4 md:p-8 space-y-12">
-        {/* Section 1: Assess Priorities */}
         <section id="plan">
           <Card className="border-none shadow-lg bg-card/80 backdrop-blur-sm">
             <CardHeader>
@@ -271,7 +306,7 @@ export function Dashboard() {
                 </div>
               </CardContent>
               <CardFooter className="flex-col sm:flex-row gap-4 items-start">
-                 <SubmitButton text="Assess Priorities" loadingText="Assessing..." icon={Send} pending={isPending} />
+                 <SubmitButton text="Assess Priorities" loadingText="Assessing..." icon={Send} pending={isAssessPending} />
                  <Button type="button" variant="ghost" onClick={resetAll}>
                     <RefreshCw className="mr-2 h-4 w-4"/> Start Over
                 </Button>
@@ -280,8 +315,7 @@ export function Dashboard() {
           </Card>
         </section>
 
-        {/* Section 2: Drag-and-Drop Priorities & Generation */}
-        {priorities.length > 0 && (
+        {priorities.length > 0 && !hasGeneratedSchedule && (
           <section id="priorities" className="animate-in fade-in-50 duration-500">
              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div className="md:col-span-2 space-y-4">
@@ -318,115 +352,90 @@ export function Dashboard() {
           </section>
         )}
         
-        {/* Section 3: Generated Schedule */}
-        {(isGenerating || schedule.length > 0) && (
-          <section id="schedule" className="animate-in fade-in-50 duration-500">
-            <h2 className="text-2xl font-bold flex items-center mb-4"><Sparkles className="mr-2 text-primary"/> Your Generated Schedule</h2>
-            {isGenerating ? (
-               <div className="flex flex-col items-center justify-center p-12 text-muted-foreground bg-card rounded-lg">
-                  <Loader2 className="mr-3 h-8 w-8 animate-spin text-primary"/>
-                  <span className="text-xl mt-4">AI is crafting your perfect day...</span>
-              </div>
-            ) : (
-              <Card>
-                <CardContent className="pt-6 space-y-4">
-                  {schedule.map((task, i) => (
-                      <div key={i} className="flex items-center p-3 rounded-lg bg-card-foreground/5">
-                          <div className="flex items-center justify-center h-10 w-10 rounded-full bg-primary/20 text-primary font-bold mr-4 shrink-0">
-                              <CheckCircle size={20}/>
-                          </div>
-                          <div>
-                              <p className="font-semibold">{task.task}</p>
-                              <p className="text-sm text-muted-foreground">{task.time}</p>
-                          </div>
-                      </div>
-                  ))}
-                </CardContent>
-                <CardFooter className="gap-2">
-                    <Button variant="secondary" onClick={onGenerate} disabled={!priorities.length || isGenerating}>
-                        <RefreshCw className="mr-2 h-4 w-4"/> Re-shuffle
-                    </Button>
-                </CardFooter>
-              </Card>
-            )}
+        {hasGeneratedSchedule && (
+          <section id="schedule" className="animate-in fade-in-50 duration-500 space-y-8">
+            <div>
+              <h2 className="text-2xl font-bold flex items-center mb-4"><Sparkles className="mr-2 text-primary"/> Your Generated Schedule</h2>
+              {isGenerating ? (
+                 <div className="flex flex-col items-center justify-center p-12 text-muted-foreground bg-card rounded-lg">
+                    <Loader2 className="mr-3 h-8 w-8 animate-spin text-primary"/>
+                    <span className="text-xl mt-4">AI is crafting your perfect day...</span>
+                </div>
+              ) : (
+                <Card>
+                  <CardContent className="pt-6 space-y-4">
+                    {schedule.map((task, i) => (
+                        <div key={i} className="flex items-center p-3 rounded-lg bg-card-foreground/5">
+                            <div className="flex items-center justify-center h-10 w-10 rounded-full bg-primary/20 text-primary font-bold mr-4 shrink-0">
+                                <CheckCircle size={20}/>
+                            </div>
+                            <div>
+                                <p className="font-semibold">{task.task}</p>
+                                <p className="text-sm text-muted-foreground">{task.time}</p>
+                            </div>
+                        </div>
+                    ))}
+                  </CardContent>
+                  <CardFooter className="gap-2 flex-wrap">
+                      <Button onClick={onGenerate} disabled={!priorities.length || isGenerating}>
+                          <RefreshCw className="mr-2 h-4 w-4"/> Re-generate
+                      </Button>
+                      <Button onClick={onSync} disabled={isSyncing}>
+                          {isSyncing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Syncing...</> : <><Calendar className="mr-2 h-4 w-4"/>Sync to Google Calendar</>}
+                      </Button>
+                  </CardFooter>
+                </Card>
+              )}
+            </div>
+            
+            <Separator />
+
+            {/* Rework and Future Planning sections */}
+            <div className="grid md:grid-cols-2 gap-8">
+                <section id="rework">
+                    <h2 className="text-2xl font-bold flex items-center mb-2"><RefreshCw className="mr-2 text-primary"/> Rework Your Day</h2>
+                    <p className="text-muted-foreground mb-4">Things change. Tell us what you did, and we'll adjust the rest of your day.</p>
+                    <Card>
+                        <form action={onRework}>
+                            <CardContent className="pt-6 space-y-4">
+                                <input type="hidden" name="originalSchedule" value={scheduleText} />
+                                <input type="hidden" name="userGoals" value={userGoals} />
+                                
+                                <div>
+                                    <Label htmlFor="remainingTime">Time Remaining Today</Label>
+                                    <Input id="remainingTime" name="remainingTime" placeholder="e.g., 4 hours" required />
+                                </div>
+                                <div>
+                                    <Label htmlFor="completedTasks">Tasks You've Completed (comma-separated)</Label>
+                                    <Input id="completedTasks" name="completedTasks" placeholder="e.g., Morning standup, Drafted email" />
+                                </div>
+                                <div>
+                                    <Label htmlFor="newConstraints">New Constraints or Events</Label>
+                                    <Input id="newConstraints" name="newConstraints" placeholder="e.g., Unexpected meeting at 3 PM" />
+                                </div>
+                            </CardContent>
+                            <CardFooter>
+                                <SubmitButton text="Rework My Day" loadingText="Reworking..." icon={RefreshCw} pending={isReworkPending}/>
+                            </CardFooter>
+                        </form>
+                    </Card>
+                </section>
+
+                <section id="future">
+                    <h2 className="text-2xl font-bold flex items-center mb-2"><Calendar className="mr-2 text-primary"/> Future Planning</h2>
+                    <p className="text-muted-foreground mb-4">Plan your tomorrow, next week, or even next month.</p>
+                    <Card>
+                        <CardContent className="pt-6 flex flex-col items-center justify-center text-center text-muted-foreground p-16">
+                            <Loader2 className="h-12 w-12 mb-4 animate-spin"/>
+                            <p className="text-lg font-medium">Coming Soon</p>
+                            <p>Get ready to conquer your future goals.</p>
+                        </CardContent>
+                    </Card>
+                </section>
+            </div>
           </section>
         )}
 
-        <Separator />
-        
-        {/* Section 4: Rework Schedule */}
-        <section id="rework">
-            <h2 className="text-2xl font-bold flex items-center mb-2"><RefreshCw className="mr-2 text-primary"/> Rework Your Day</h2>
-            <p className="text-muted-foreground mb-4">Things change. Paste your schedule, tell us what you did, and we'll adjust the rest of your day.</p>
-            <Card>
-                <form action={onRework}>
-                    <CardContent className="pt-6 space-y-4">
-                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                                <Label htmlFor="userGoalsRework">Your Original Goals</Label>
-                                <Input id="userGoalsRework" name="userGoals" placeholder="e.g., Finish report, learn React" required />
-                            </div>
-                             <div>
-                                <Label htmlFor="remainingTime">Time Remaining Today</Label>
-                                <Input id="remainingTime" name="remainingTime" placeholder="e.g., 4 hours" required />
-                            </div>
-                        </div>
-                        <div>
-                            <Label htmlFor="originalSchedule">Original Schedule</Label>
-                            <Textarea id="originalSchedule" name="originalSchedule" placeholder="Paste your generated schedule here." className="min-h-[150px]" required/>
-                        </div>
-                        <div>
-                            <Label htmlFor="completedTasks">Tasks You've Completed (comma-separated)</Label>
-                            <Input id="completedTasks" name="completedTasks" placeholder="e.g., Morning standup, Drafted email" />
-                        </div>
-                        <div>
-                            <Label htmlFor="newConstraints">New Constraints or Events</Label>
-                            <Input id="newConstraints" name="newConstraints" placeholder="e.g., Unexpected meeting at 3 PM" />
-                        </div>
-                    </CardContent>
-                    <CardFooter>
-                        <SubmitButton text="Rework My Day" loadingText="Reworking..." icon={RefreshCw} pending={isPending}/>
-                    </CardFooter>
-                </form>
-            </Card>
-
-             {reworkedSchedule && (
-                <Card className="mt-6 animate-in fade-in-50">
-                    <CardHeader>
-                        <CardTitle className="flex items-center"><Sparkles className="mr-2 text-primary"/> Your Revised Schedule</CardTitle>
-                        <CardDescription>{reworkedSchedule.reasoning}</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                        {parseSchedule(reworkedSchedule.revisedSchedule).map((task, i) => (
-                             <div key={i} className="flex items-center p-3 rounded-lg bg-card-foreground/5">
-                                <div className="flex items-center justify-center h-10 w-10 rounded-full bg-primary/20 text-primary font-bold mr-4">
-                                    <CheckCircle size={20}/>
-                                </div>
-                                <div>
-                                    <p className="font-semibold">{task.task}</p>
-                                    <p className="text-sm text-muted-foreground">{task.time}</p>
-                                </div>
-                            </div>
-                        ))}
-                    </CardContent>
-                </Card>
-            )}
-        </section>
-
-        <Separator />
-        
-        {/* Section 5: Future Planning */}
-        <section id="future">
-            <h2 className="text-2xl font-bold flex items-center mb-2"><Calendar className="mr-2 text-primary"/> Future Planning</h2>
-            <p className="text-muted-foreground mb-4">Plan your tomorrow, next week, or even next month.</p>
-            <Card>
-                <CardContent className="pt-6 flex flex-col items-center justify-center text-center text-muted-foreground p-16">
-                    <Loader2 className="h-12 w-12 mb-4 animate-spin"/>
-                    <p className="text-lg font-medium">Coming Soon</p>
-                    <p>Get ready to conquer your future goals.</p>
-                </CardContent>
-            </Card>
-        </section>
       </div>
     </>
   );
