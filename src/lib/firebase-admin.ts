@@ -3,22 +3,23 @@ import * as admin from 'firebase-admin';
 let app: admin.app.App;
 
 if (!admin.apps.length) {
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
-    ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY)
-    : undefined;
+  const serviceAccountString = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
 
-  if (serviceAccount) {
-    app = admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
+  if (serviceAccountString) {
+    try {
+      const serviceAccount = JSON.parse(serviceAccountString);
+      app = admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+    } catch (e) {
+      console.error('Error parsing FIREBASE_SERVICE_ACCOUNT_KEY:', e);
+      app = {} as admin.app.App;
+    }
   } else {
     console.warn(
       'Firebase Admin not initialized. Service account key is missing in environment variables. Server-side Firebase features will not work.'
     );
-    // In a non-initialized state, we can't export auth.
-    // We'll create a dummy object to avoid crashing on import,
-    // though any function call will fail.
-    app = {} as admin.app.App; 
+    app = {} as admin.app.App;
   }
 } else {
   app = admin.app();
