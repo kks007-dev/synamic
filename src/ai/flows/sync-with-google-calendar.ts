@@ -80,35 +80,42 @@ const syncWithGoogleCalendarFlow = ai.defineFlow(
             tools: [createCalendarEvent],
         });
         
-        const lastContent = history[history.length - 1]?.content;
+        const lastMessage = history[history.length - 1];
 
-        if (!lastContent) {
+        if (!lastMessage?.content) {
             throw new Error("The AI failed to process the schedule for calendar sync.");
         }
 
         const syncedEvents: any[] = [];
         const errors: string[] = [];
 
-        lastContent.forEach(part => {
-            if (part.toolResponse) {
-                const toolRequest = history.flatMap(h => h.content).find(c => c.toolRequest?.id === part.toolResponse?.id);
-                if (part.toolResponse.result.success) {
-                   if(toolRequest && toolRequest.toolRequest) {
+        // Filter for tool responses in the last message's content
+        const toolResponses = lastMessage.content.filter(part => part.toolResponse);
+
+        if (toolResponses.length > 0) {
+            toolResponses.forEach(part => {
+                if (part.toolResponse) {
+                    const toolRequest = history
+                        .flatMap(h => h.content)
+                        .find(c => c.toolRequest?.id === part.toolResponse?.id);
+
+                    if (part.toolResponse.result.success && toolRequest?.toolRequest) {
                         syncedEvents.push({
                             title: toolRequest.toolRequest.input.title,
                             startTime: toolRequest.toolRequest.input.startTime,
                             endTime: toolRequest.toolRequest.input.endTime,
                             eventId: part.toolResponse.result.eventId,
                         });
-                   }
-                } else {
-                    errors.push(`Failed to create event for "${toolRequest?.toolRequest?.input?.title || 'an unknown task'}".`);
+                    } else {
+                        errors.push(`Failed to create event for "${toolRequest?.toolRequest?.input?.title || 'an unknown task'}".`);
+                    }
                 }
-            }
-        });
+            });
+        }
+
 
         if (syncedEvents.length === 0 && errors.length === 0) {
-             errors.push("Could not parse any valid events from the provided schedule text.");
+             errors.push("Could not parse any valid events from the provided schedule text. The AI might not have found any tasks to schedule.");
         }
 
         return {
