@@ -74,7 +74,7 @@ const syncWithGoogleCalendarFlow = ai.defineFlow(
     },
     async (input) => {
         const {history} = await ai.generate({
-            model: 'googleai/gemini-2.5-flash-preview',
+            model: 'googleai/gemini-1.5-flash-latest',
             system: systemPrompt,
             prompt: `Schedule:\n${input.schedule}`,
             tools: [createCalendarEvent],
