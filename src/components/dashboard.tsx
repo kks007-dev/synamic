@@ -275,10 +275,14 @@ export function Dashboard() {
   };
   
   const onSync = async () => {
-      if (!user || user.providerData.every(p => p.providerId !== 'google.com')) {
+      if (!user) return;
+      
+      if (user.providerData.every(p => p.providerId !== 'google.com')) {
           toast({ variant: "destructive", title: "Google Sign-In Required", description: "Please sign in with Google to sync your calendar."});
           try {
             const provider = new GoogleAuthProvider();
+            // Requesting calendar scope
+            provider.addScope('https://www.googleapis.com/auth/calendar.events');
             await signInWithPopup(auth, provider);
             toast({ title: "Google Sign-In Successful!", description: "You can now try syncing your calendar again." });
           } catch (error: any) {

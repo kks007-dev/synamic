@@ -7,6 +7,16 @@ import { generateSchedule, GenerateScheduleInput, GenerateScheduleOutput } from 
 import { dynamicallyReworkSchedule, DynamicallyReworkScheduleInput, DynamicallyReworkScheduleOutput } from "@/ai/flows/dynamically-rework-schedule";
 import { syncWithGoogleCalendar, SyncWithGoogleCalendarInput, SyncWithGoogleCalendarOutput } from "@/ai/flows/sync-with-google-calendar";
 import { auth } from "@/lib/firebase-admin";
+import { headers } from "next/headers";
+
+async function getUserIdToken(): Promise<string> {
+    const authorization = headers().get("Authorization");
+    if (authorization?.startsWith("Bearer ")) {
+        return authorization.substring(7);
+    }
+    throw new Error("User not authenticated.");
+}
+
 
 const assessPrioritySchema = z.object({
   userGoals: z.string().min(10, "Please describe your goals in a bit more detail."),
@@ -89,22 +99,19 @@ const syncToCalendarSchema = z.object({
 });
 
 
-export async function handleSyncToCalendar(input: Omit<SyncWithGoogleCalendarInput, 'oauthToken'>): Promise<{ data?: SyncWithGoogleCalendarOutput, error?: string }> {
+export async function handleSyncToCalendar(input: { events: z.infer<typeof eventSchema>[] }): Promise<{ data?: SyncWithGoogleCalendarOutput, error?: string }> {
     const validation = syncToCalendarSchema.safeParse(input);
-
+    
     if (!validation.success) {
         return { error: "Invalid input for calendar sync." };
     }
 
     try {
-        // Here you would typically get the user's OAuth token for Google Calendar.
-        // For this example, we'll pass a placeholder. In a real app, this
-        // would be securely retrieved after the user authenticates.
+        const idToken = await getUserIdToken();
+
         const output = await syncWithGoogleCalendar({
             ...validation.data,
-            // This is a placeholder and will need to be replaced with a real token
-            // obtained from the user's Google Sign-In session.
-            oauthToken: "USER_OAUTH_TOKEN_PLACEHOLDER",
+            idToken: idToken, 
         });
         if (output.errors.length > 0) {
             return { error: output.errors.join(', ') };

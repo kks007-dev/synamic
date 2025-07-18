@@ -56,6 +56,7 @@ export default function SignInPage() {
     setIsLoading(true);
     try {
         const provider = new GoogleAuthProvider();
+        provider.addScope('https://www.googleapis.com/auth/calendar.events');
         await signInWithPopup(auth, provider);
         router.push("/");
     } catch (error: any) {
