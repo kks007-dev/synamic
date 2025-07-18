@@ -6,7 +6,6 @@ import { assessPriority, AssessPriorityInput, AssessPriorityOutput } from "@/ai/
 import { generateSchedule, GenerateScheduleInput, GenerateScheduleOutput } from "@/ai/flows/generate-schedule";
 import { dynamicallyReworkSchedule, DynamicallyReworkScheduleInput, DynamicallyReworkScheduleOutput } from "@/ai/flows/dynamically-rework-schedule";
 import { syncWithGoogleCalendar, SyncWithGoogleCalendarInput, SyncWithGoogleCalendarOutput } from "@/ai/flows/sync-with-google-calendar";
-import { auth } from "@/lib/firebase-admin";
 import { headers } from "next/headers";
 
 async function getUserIdToken(): Promise<string> {

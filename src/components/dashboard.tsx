@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { GoogleAuthProvider, linkWithPopup } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import {
   handleAssessPriority,
@@ -73,13 +73,13 @@ function SubmitButton({ text, loadingText, icon: Icon = Sparkles, pending }: { t
 function parseSchedule(scheduleText: string): ScheduleTask[] {
     if (!scheduleText) return [];
     
-    // Attempt to parse as JSON array first
     try {
-        const tasks = JSON.parse(scheduleText.replace(/,\s*]/g, ']')); // Tolerate trailing commas
+        const tasks = JSON.parse(scheduleText.replace(/,\s*]/g, ']'));
         if (Array.isArray(tasks)) {
-             return tasks.map(t => {
+             return tasks.map((t, index) => {
                 const [startTime, endTime] = t.time?.split(' - ').map((s: string) => s.trim()) || [null, null];
                 return {
+                    id: `task-${index}-${new Date().getTime()}`,
                     time: t.time || 'N/A',
                     task: t.task || 'Untitled Task',
                     startTime: startTime,
@@ -89,25 +89,31 @@ function parseSchedule(scheduleText: string): ScheduleTask[] {
             });
         }
     } catch (e) {
-        // Fallback to line-by-line parsing if JSON fails
+        console.error("Failed to parse schedule JSON:", e, "---", scheduleText);
     }
-
+    
+    // Fallback for non-JSON or malformed JSON
     const lines = scheduleText.split('\n').filter(line => line.trim().length > 0);
-    const tasks: ScheduleTask[] = [];
-
-    for (const line of lines) {
-        const match = line.match(/(\d{1,2}:\d{2}\s?[AP]M)\s?-\s?(\d{1,2}:\d{2}\s?[AP]M):\s*(.*)/);
-        if (match) {
+    return lines.map((line, index) => {
+         const match = line.match(/(\d{1,2}:\d{2}\s?[AP]M)\s?-\s?(\d{1,2}:\d{2}\s?[AP]M):\s*(.*)/);
+         if (match) {
             const [, startTime, endTime, task] = match;
-            tasks.push({
-                time: `${startTime} - ${endTime}`,
+            return {
+                id: `task-${index}-${new Date().getTime()}`,
+                time: `${startTime.trim()} - ${endTime.trim()}`,
                 task: task.trim(),
                 startTime: startTime.trim(),
                 endTime: endTime.trim(),
-            });
-        }
-    }
-    return tasks;
+            };
+         }
+         return {
+            id: `task-${index}-${new Date().getTime()}`,
+            time: 'N/A',
+            task: line,
+            startTime: undefined,
+            endTime: undefined,
+         }
+    });
 }
 
 
@@ -151,11 +157,16 @@ function SortablePriorityItem({ item }: { item: PriorityItem }) {
 function parseTimeToDate(timeStr: string): Date {
     const now = new Date();
     const [time, modifier] = timeStr.split(' ');
+    if (!modifier) { // Handle "HH:MM" format
+        const [hours, minutes] = time.split(':').map(Number);
+        now.setHours(hours, minutes, 0, 0);
+        return now;
+    }
     let [hours, minutes] = time.split(':').map(Number);
-    if (modifier === 'PM' && hours < 12) {
+    if (modifier.toUpperCase() === 'PM' && hours < 12) {
         hours += 12;
     }
-    if (modifier === 'AM' && hours === 12) {
+    if (modifier.toUpperCase() === 'AM' && hours === 12) {
         hours = 0;
     }
     now.setHours(hours, minutes, 0, 0);
@@ -175,34 +186,35 @@ function ScheduleTimeline({ tasks, onScheduleChange }: { tasks: ScheduleTask[], 
     return (
         <Card>
             <CardContent className="pt-6">
-                <div className="relative pl-6 space-y-2">
-                    {/* Timeline bar */}
-                    <div className="absolute left-8 top-2 bottom-2 w-0.5 bg-border"></div>
-
+                <div className="relative pl-6 space-y-4">
+                    <div className="absolute left-8 top-2 bottom-2 w-0.5 bg-border -translate-x-1/2"></div>
                     {tasks.map((item, index) => {
-                        const startTime = item.startTime ? parseTimeToDate(item.startTime) : new Date(0);
-                        const endTime = item.endTime ? parseTimeToDate(item.endTime) : new Date(0);
-                        const isActive = currentTime >= startTime && currentTime < endTime;
+                        const startTime = item.startTime ? parseTimeToDate(item.startTime) : null;
+                        const endTime = item.endTime ? parseTimeToDate(item.endTime) : null;
+                        const isActive = startTime && endTime && currentTime >= startTime && currentTime < endTime;
                         
                         return (
-                            <div key={index} className="flex items-start gap-4 relative">
-                                <div className={`z-10 flex-shrink-0 flex items-center justify-center rounded-full h-5 w-5 mt-1 ${isActive ? 'bg-green-500 ring-4 ring-green-500/30' : 'bg-primary'}`}>
+                            <div key={item.id || index} className="flex items-start gap-4 relative">
+                                <div className={`z-10 flex-shrink-0 flex items-center justify-center rounded-full h-5 w-5 mt-1 -translate-x-1/2 ${isActive ? 'bg-green-500 ring-4 ring-green-500/30' : 'bg-primary'}`}>
                                 </div>
-                                <div className="flex-grow -mt-1 w-full">
+                                <div className="flex-grow -mt-1 w-full bg-card p-4 rounded-lg border">
                                     <div className="flex justify-between items-baseline">
                                         <p className="font-semibold text-primary">{item.time}</p>
+                                        {item.duration && <p className="text-sm text-muted-foreground">{item.duration}</p>}
                                     </div>
-                                    <p className="text-card-foreground/90">{item.task}</p>
+                                    <p className="text-card-foreground/90 mt-1">{item.task}</p>
                                 </div>
                             </div>
                         );
                     })}
                 </div>
             </CardContent>
-            <CardFooter>
+            <CardFooter className="flex-col items-start">
+                <Label htmlFor="scheduleText" className="mb-2">Edit Schedule Text</Label>
                  <Textarea
+                    id="scheduleText"
                     name="scheduleText"
-                    className="min-h-[150px] text-sm font-mono mt-4"
+                    className="min-h-[150px] text-sm font-mono mt-2"
                     value={scheduleText}
                     onChange={(e) => onScheduleChange(e.target.value)}
                   />
@@ -297,16 +309,17 @@ export function Dashboard() {
   const onSync = async () => {
       if (!user) return;
       
-      if (user.providerData.every(p => p.providerId !== 'google.com')) {
-          toast({ variant: "destructive", title: "Google Sign-In Required", description: "Please sign in with Google to sync your calendar."});
+      const isGoogleLinked = user.providerData.some(p => p.providerId === 'google.com');
+
+      if (!isGoogleLinked) {
+          toast({ variant: "destructive", title: "Google Account Required", description: "Please link your Google account to sync the calendar."});
           try {
             const provider = new GoogleAuthProvider();
-            // Requesting calendar scope
             provider.addScope('https://www.googleapis.com/auth/calendar.events');
-            await signInWithPopup(auth, provider);
-            toast({ title: "Google Sign-In Successful!", description: "You can now try syncing your calendar again." });
+            await linkWithPopup(auth.currentUser!, provider);
+            toast({ title: "Google Account Linked!", description: "You can now sync your calendar." });
           } catch (error: any) {
-            toast({ variant: "destructive", title: "Google Sign-In Failed", description: error.message });
+            toast({ variant: "destructive", title: "Google Linking Failed", description: error.message });
           }
           return;
       }
@@ -342,12 +355,11 @@ export function Dashboard() {
   const onRework = (formData: FormData) => {
     startReworkTransition(async () => {
         const newConstraints = formData.get("newConstraints") as string;
-        const currentScheduleText = parseSchedule(scheduleText).map(t => `${t.time}: ${t.task}`).join('\n');
-
+        
         const input = {
-            originalSchedule: currentScheduleText,
-            completedTasks: [], // We let the AI figure this out
-            remainingTime: "the rest of the day", // Let AI determine this
+            originalSchedule: scheduleText,
+            completedTasks: [], 
+            remainingTime: "the rest of the day",
             newConstraints: newConstraints,
             userGoals: userGoals,
         };
@@ -484,11 +496,10 @@ export function Dashboard() {
             
             <Separator />
 
-            {/* Rework and Future Planning sections */}
             <div className="grid md:grid-cols-2 gap-8">
                 <section id="rework">
                     <h2 className="text-2xl font-bold flex items-center mb-2"><RefreshCw className="mr-2 text-primary"/> Rework Your Day</h2>
-                    <p className="text-muted-foreground mb-4">You can edit the schedule text in the box above, then tell the AI what happened to adjust.</p>
+                    <p className="text-muted-foreground mb-4">Edit the schedule text in the box above, then provide context to adjust.</p>
                     <Card>
                         <form action={onRework}>
                             <CardContent className="pt-6 space-y-4">

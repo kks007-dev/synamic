@@ -1,3 +1,4 @@
+
 'use server';
 
 /**
@@ -23,7 +24,6 @@ const createCalendarEvent = ai.defineTool(
             title: z.string().describe('The title of the calendar event.'),
             startTime: z.string().describe('The start time of the event in ISO 8601 format.'),
             endTime: z.string().describe('The end time of the event in ISO 8601 format.'),
-            idToken: z.string().describe("The user's Firebase ID token."),
         }),
         outputSchema: z.object({
             success: z.boolean(),
@@ -32,32 +32,20 @@ const createCalendarEvent = ai.defineTool(
     },
     async (input) => {
         try {
-            const decodedToken = await auth.verifyIdToken(input.idToken);
-            const googleId = decodedToken.firebase.identities['google.com']?.[0];
+            // Note: In a real app with a robust backend, you would use a refresh token
+            // stored securely to get a fresh access token for the user to make API calls
+            // on their behalf, even when they are offline.
+            // For this environment, we are simply demonstrating the flow. The actual
+            // OAuth2 client setup for a production app would be more complex.
             
-            if (!googleId) {
-                throw new Error("User is not signed in with Google or doesn't have a Google identity linked.");
-            }
-
-            // In a real app, you would fetch and use a refresh token to get a fresh access token.
-            // For this environment, we rely on the short-lived token from the client for demonstration.
-            // This is NOT a production-ready approach for background tasks.
-            const oauth2Client = new google.auth.OAuth2();
-            // This is a placeholder for the real access token. In a real-world scenario, you would
-            // get this from the client-side credential after sign-in, or use a refresh token on the server.
-            // Since we can't securely get the access token here, this will fail.
-            // A full implementation requires a more robust OAuth2 flow.
-            // For now, we will log a warning and return a mock response.
+            console.log(`MOCK: Creating event: ${input.title} from ${input.startTime} to ${input.endTime}`);
             
-            console.warn("This is a mock implementation. A real OAuth2 flow is required for production.");
-            console.log(`Creating event: ${input.title} from ${input.startTime} to ${input.endTime}`);
-            
-            // MOCK RESPONSE
-            return { success: true, eventId: `evt_${Math.random().toString(36).substring(7)}` };
+            // This is a MOCK RESPONSE. A full implementation requires a robust OAuth2 flow
+            // with a configured Google Cloud project, OAuth consent screen, and credential management.
+            return { success: true, eventId: `evt_mock_${Math.random().toString(36).substring(7)}` };
 
         } catch (error: any) {
             console.error("Error in createCalendarEvent tool:", error);
-            // Returning success: false will allow the flow to report the error.
             return { success: false }; 
         }
     }
@@ -108,13 +96,21 @@ const syncWithGoogleCalendarFlow = ai.defineFlow(
         const syncedEvents: any[] = [];
         const errors: string[] = [];
 
+        // Verify the user's token to ensure they are authenticated.
+        const decodedToken = await auth.verifyIdToken(input.idToken);
+        const isGoogleLinked = decodedToken.firebase.identities['google.com'];
+
+        if (!isGoogleLinked) {
+            errors.push("User is not signed in with Google. Please link your Google account.");
+            return { syncedEvents, errors };
+        }
+
         for (const event of input.events) {
             try {
                 const result = await createCalendarEvent({
                     title: event.title,
                     startTime: convertToISO(event.startTime),
                     endTime: convertToISO(event.endTime),
-                    idToken: input.idToken,
                 });
                 
                 if (result.success) {
