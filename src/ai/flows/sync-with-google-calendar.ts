@@ -58,22 +58,13 @@ export async function syncWithGoogleCalendar(input: SyncWithGoogleCalendarInput)
 }
 
 
-const prompt = ai.definePrompt({
-    name: 'syncWithGoogleCalendarPrompt',
-    input: { schema: SyncWithGoogleCalendarInputSchema },
-    // output: { schema: SyncWithGoogleCalendarOutputSchema }, We let the AI call tools and we will formulate the output
-    tools: [createCalendarEvent],
-    prompt: `You are an assistant that processes a user's daily schedule and creates corresponding events in their Google Calendar using the provided tools.
+const systemPrompt = `You are an assistant that processes a user's daily schedule and creates corresponding events in their Google Calendar using the provided tools.
 
-    The user's schedule is provided below. Parse each line to identify the task title, start time, and end time.
-    Today's date is ${new Date().toDateString()}. Use this to construct full ISO 8601 timestamps for each event.
-    
-    For each valid task in the schedule, call the \`createCalendarEvent\` tool with the correct parameters.
-    
-    Schedule:
-    {{{schedule}}}
-    `,
-});
+The user's schedule is provided below. Parse each line to identify the task title, start time, and end time.
+Today's date is ${new Date().toDateString()}. Use this to construct full ISO 8601 timestamps for each event.
+
+For each valid task in the schedule, call the \`createCalendarEvent\` tool with the correct parameters.`;
+
 
 const syncWithGoogleCalendarFlow = ai.defineFlow(
     {
@@ -83,9 +74,10 @@ const syncWithGoogleCalendarFlow = ai.defineFlow(
     },
     async (input) => {
         const {history} = await ai.generate({
-            prompt: prompt.render({input}),
+            model: 'googleai/gemini-2.0-flash',
+            system: systemPrompt,
+            prompt: `Schedule:\n${input.schedule}`,
             tools: [createCalendarEvent],
-            history: []
         });
         
         const lastContent = history[history.length - 1]?.content;
@@ -99,21 +91,18 @@ const syncWithGoogleCalendarFlow = ai.defineFlow(
 
         lastContent.forEach(part => {
             if (part.toolResponse) {
+                const toolRequest = history.flatMap(h => h.content).find(c => c.toolRequest?.id === part.toolResponse?.id);
                 if (part.toolResponse.result.success) {
-                   const toolRequest = history.find(h => h.role === 'model' && h.content.find(c => c.toolRequest?.id === part.toolResponse?.id));
-                   if(toolRequest) {
-                       const requestPart = toolRequest.content.find(c => c.toolRequest?.id === part.toolResponse?.id);
-                       if (requestPart && requestPart.toolRequest) {
-                            syncedEvents.push({
-                                title: requestPart.toolRequest.input.title,
-                                startTime: requestPart.toolRequest.input.startTime,
-                                endTime: requestPart.toolRequest.input.endTime,
-                                eventId: part.toolResponse.result.eventId,
-                            });
-                       }
+                   if(toolRequest && toolRequest.toolRequest) {
+                        syncedEvents.push({
+                            title: toolRequest.toolRequest.input.title,
+                            startTime: toolRequest.toolRequest.input.startTime,
+                            endTime: toolRequest.toolRequest.input.endTime,
+                            eventId: part.toolResponse.result.eventId,
+                        });
                    }
                 } else {
-                    errors.push(`Failed to create event.`);
+                    errors.push(`Failed to create event for "${toolRequest?.toolRequest?.input?.title || 'an unknown task'}".`);
                 }
             }
         });

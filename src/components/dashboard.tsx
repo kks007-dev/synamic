@@ -1,7 +1,9 @@
 
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
+import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { auth } from "@/lib/firebase";
 import {
   handleAssessPriority,
   handleGenerateSchedule,
@@ -10,6 +12,7 @@ import {
 } from "@/lib/actions";
 import type { ScheduleTask } from "@/lib/types";
 import type { PriorityItem } from "@/ai/flows/assess-priority";
+import { useAuth } from "@/components/auth-provider";
 
 import {
   DndContext,
@@ -38,7 +41,6 @@ import { Separator } from "@/components/ui/separator";
 import {
   Calendar,
   Sparkles,
-  CheckCircle,
   Clock,
   RefreshCw,
   ListTodo,
@@ -70,17 +72,22 @@ function SubmitButton({ text, loadingText, icon: Icon = Sparkles, pending }: { t
 
 function parseSchedule(scheduleText: string): ScheduleTask[] {
   if (!scheduleText) return [];
-  return scheduleText
-    .split("\n")
-    .filter((line) => line.trim().match(/^(\d{1,2}:\d{2}\s?[AP]M\s?-\s?\d{1,2}:\d{2}\s?[AP]M)|\*/))
-    .map((line) => {
-      const timeMatch = line.match(/^(\d{1,2}:\d{2}\s?[AP]M\s?-\s?\d{1,2}:\d{2}\s?[AP]M)/);
-      const taskMatch = line.replace(/^(\d{1,2}:\d{2}\s?[AP]M\s?-\s?\d{1,2}:\d{2}\s?[AP]M:?\s?-?\s?)/, '').replace(/^\*\s*/, '');
-      return {
-        time: timeMatch ? timeMatch[1] : "All-day",
-        task: taskMatch.trim(),
-      };
-    });
+  const lines = scheduleText.split('\n').filter(line => line.trim().length > 0);
+  const tasks: ScheduleTask[] = [];
+
+  for (const line of lines) {
+    const match = line.match(/(\d{1,2}:\d{2}\s?[AP]M)\s?-\s?(\d{1,2}:\d{2}\s?[AP]M):\s*(.*)/);
+    if (match) {
+      const [, startTime, endTime, task] = match;
+      tasks.push({
+        time: `${startTime} - ${endTime}`,
+        task: task.trim(),
+        startTime: startTime.trim(),
+        endTime: endTime.trim(),
+      });
+    }
+  }
+  return tasks;
 }
 
 
@@ -121,7 +128,71 @@ function SortablePriorityItem({ item }: { item: PriorityItem }) {
   );
 }
 
+function parseTimeToDate(timeStr: string): Date {
+    const now = new Date();
+    const [time, modifier] = timeStr.split(' ');
+    let [hours, minutes] = time.split(':').map(Number);
+    if (modifier === 'PM' && hours < 12) {
+        hours += 12;
+    }
+    if (modifier === 'AM' && hours === 12) {
+        hours = 0;
+    }
+    now.setHours(hours, minutes, 0, 0);
+    return now;
+}
+
+function ScheduleTimeline({ tasks, onScheduleChange }: { tasks: ScheduleTask[], onScheduleChange: (newSchedule: string) => void }) {
+    const [currentTime, setCurrentTime] = useState(new Date());
+
+    useEffect(() => {
+        const timer = setInterval(() => setCurrentTime(new Date()), 60000); // Update every minute
+        return () => clearInterval(timer);
+    }, []);
+
+    const scheduleText = tasks.map(t => `${t.time}: ${t.task}`).join('\n');
+
+    return (
+        <Card>
+            <CardContent className="pt-6">
+                <div className="relative pl-6 space-y-2">
+                    {/* Timeline bar */}
+                    <div className="absolute left-8 top-2 bottom-2 w-0.5 bg-border"></div>
+
+                    {tasks.map((item, index) => {
+                        const startTime = item.startTime ? parseTimeToDate(item.startTime) : new Date(0);
+                        const endTime = item.endTime ? parseTimeToDate(item.endTime) : new Date(0);
+                        const isActive = currentTime >= startTime && currentTime < endTime;
+                        
+                        return (
+                            <div key={index} className="flex items-start gap-4 relative">
+                                <div className={`z-10 flex-shrink-0 flex items-center justify-center rounded-full h-5 w-5 mt-1 ${isActive ? 'bg-green-500 ring-4 ring-green-500/30' : 'bg-primary'}`}>
+                                </div>
+                                <div className="flex-grow -mt-1 w-full">
+                                    <div className="flex justify-between items-baseline">
+                                        <p className="font-semibold text-primary">{item.time}</p>
+                                    </div>
+                                    <p className="text-card-foreground/90">{item.task}</p>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </CardContent>
+            <CardFooter>
+                 <Textarea
+                    name="scheduleText"
+                    className="min-h-[150px] text-sm font-mono mt-4"
+                    value={scheduleText}
+                    onChange={(e) => onScheduleChange(e.target.value)}
+                  />
+            </CardFooter>
+        </Card>
+    );
+}
+
 export function Dashboard() {
+  const { user } = useAuth();
   const { toast } = useToast();
   const [isAssessPending, startAssessTransition] = useTransition();
   const [isReworkPending, startReworkTransition] = useTransition();
@@ -204,6 +275,18 @@ export function Dashboard() {
   };
   
   const onSync = async () => {
+      if (!user || user.providerData.every(p => p.providerId !== 'google.com')) {
+          toast({ variant: "destructive", title: "Google Sign-In Required", description: "Please sign in with Google to sync your calendar."});
+          try {
+            const provider = new GoogleAuthProvider();
+            await signInWithPopup(auth, provider);
+            toast({ title: "Google Sign-In Successful!", description: "You can now sync your calendar." });
+          } catch (error: any) {
+            toast({ variant: "destructive", title: "Google Sign-In Failed", description: error.message });
+          }
+          return;
+      }
+
       if (!scheduleText) {
           toast({ variant: "destructive", title: "No schedule to sync." });
           return;
@@ -227,11 +310,10 @@ export function Dashboard() {
 
   const onRework = (formData: FormData) => {
     startReworkTransition(async () => {
-        const editedSchedule = formData.get("editedSchedule") as string;
         const newConstraints = formData.get("newConstraints") as string;
 
         const input = {
-            originalSchedule: editedSchedule,
+            originalSchedule: scheduleText,
             completedTasks: [], // We let the AI figure this out from the edited schedule
             remainingTime: "the rest of the day", // Let AI determine this
             newConstraints: newConstraints,
@@ -354,24 +436,17 @@ export function Dashboard() {
                     <span className="text-xl mt-4">AI is crafting your perfect day...</span>
                 </div>
               ) : (
-                <Card>
-                  <CardContent className="pt-6 space-y-4">
-                     <Textarea
-                        name="scheduleText"
-                        className="min-h-[250px] text-base font-mono"
-                        value={scheduleText}
-                        onChange={(e) => setScheduleText(e.target.value)}
-                      />
-                  </CardContent>
-                  <CardFooter className="gap-2 flex-wrap">
-                      <Button onClick={onGenerate} disabled={!priorities.length || isGenerating}>
-                          <RefreshCw className="mr-2 h-4 w-4"/> Re-generate
-                      </Button>
-                      <Button onClick={onSync} disabled={isSyncing}>
-                          {isSyncing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Syncing...</> : <><Calendar className="mr-2 h-4 w-4"/>Sync to Google Calendar</>}
-                      </Button>
-                  </CardFooter>
-                </Card>
+                <>
+                <ScheduleTimeline tasks={scheduleTasks} onScheduleChange={setScheduleText} />
+                <div className="flex flex-wrap gap-2 mt-4">
+                    <Button onClick={onGenerate} disabled={!priorities.length || isGenerating}>
+                        <RefreshCw className="mr-2 h-4 w-4"/> Re-generate
+                    </Button>
+                    <Button onClick={onSync} disabled={isSyncing}>
+                        {isSyncing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Syncing...</> : <><Calendar className="mr-2 h-4 w-4"/>Sync to Google Calendar</>}
+                    </Button>
+                </div>
+                </>
               )}
             </div>
             
@@ -381,11 +456,10 @@ export function Dashboard() {
             <div className="grid md:grid-cols-2 gap-8">
                 <section id="rework">
                     <h2 className="text-2xl font-bold flex items-center mb-2"><RefreshCw className="mr-2 text-primary"/> Rework Your Day</h2>
-                    <p className="text-muted-foreground mb-4">Edit the schedule text above, then tell the AI what happened. It will adjust the rest of your day.</p>
+                    <p className="text-muted-foreground mb-4">You can edit the schedule text in the box above, then tell the AI what happened to adjust.</p>
                     <Card>
                         <form action={onRework}>
                             <CardContent className="pt-6 space-y-4">
-                                <input type="hidden" name="editedSchedule" value={scheduleText} />
                                 <div>
                                     <Label htmlFor="newConstraints">Context for Rework</Label>
                                     <Input id="newConstraints" name="newConstraints" placeholder="e.g., Lunch ran an hour late." required />
