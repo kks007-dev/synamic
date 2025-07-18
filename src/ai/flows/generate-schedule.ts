@@ -62,10 +62,11 @@ const prompt = ai.definePrompt({
   Learning Goal: {{{learningGoal}}}
   Other Goals: {{{otherGoals}}}
 
-  Please provide a detailed schedule for the day as a list.
+  Please provide a detailed schedule for the day as a list of items.
   Each item in the schedule must have a specific time slot (e.g., "1:00 PM - 2:30 PM").
   The schedule should be realistic and account for breaks and transitions between activities.
-  The schedule should also indicate the duration of each task.
+  The schedule must also indicate the duration of each task.
+  You MUST include a 1-hour lunch break around noon and a dinner break if the schedule extends into the evening.
   Do not deviate from the priority that the user provides.
 `,
 });

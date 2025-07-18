@@ -11,13 +11,13 @@ import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
 const DynamicallyReworkScheduleInputSchema = z.object({
-  originalSchedule: z.string().describe('The user\'s original schedule for the day.'),
-  completedTasks: z.array(z.string()).describe('A list of tasks that the user has already completed.'),
-  remainingTime: z.string().describe('The amount of time remaining in the day (e.g., "3 hours").'),
+  originalSchedule: z.string().describe('The user\'s original schedule for the day, which they may have edited.'),
+  completedTasks: z.array(z.string()).describe('A list of tasks that the user has already completed. Can be empty.'),
+  remainingTime: z.string().describe('The amount of time remaining in the day (e.g., "3 hours", "the rest of the day").'),
   newConstraints: z
     .string() 
     .optional()
-    .describe('Any new constraints or unexpected events that have occurred (optional).'),
+    .describe('Any new constraints or unexpected events that have occurred (e.g. "Lunch was an hour late", "Unexpected meeting at 3pm"). This is the primary driver for the rework.'),
   userGoals: z.string().describe('The user\'s overall goals for the day.'),
 });
 export type DynamicallyReworkScheduleInput = z.infer<typeof DynamicallyReworkScheduleInputSchema>;
@@ -36,19 +36,25 @@ const prompt = ai.definePrompt({
   name: 'dynamicallyReworkSchedulePrompt',
   input: {schema: DynamicallyReworkScheduleInputSchema},
   output: {schema: DynamicallyReworkScheduleOutputSchema},
-  prompt: `You are an AI assistant that helps users dynamically adjust their schedules when they deviate from their original plans.
+  prompt: `You are an AI assistant that helps users dynamically adjust their schedules.
 
-  The user provides their original schedule, a list of completed tasks, the remaining time in the day, any new constraints or unexpected events, and their overall goals for the day.
+  The user provides their original/edited schedule, any new constraints, and their overall goals for the day.
+  Your main task is to revise the schedule based on the new constraints.
+  
+  Analyze the current time (it's ${new Date().toLocaleTimeString()}) and the provided schedule to figure out which tasks are likely completed.
+  Then, reschedule the remaining tasks for the rest of the day, accommodating the new constraints.
+  The new schedule should be a complete schedule for the whole day, including the parts that have already passed and the newly adjusted future parts.
 
-  Based on this information, you will revise the schedule to best align with the user\'s goals, reprioritizing tasks or suggesting alternative activities as needed.
+  Original/Edited Schedule: 
+  {{{originalSchedule}}}
 
-  Original Schedule: {{{originalSchedule}}}
-  Completed Tasks: {{#each completedTasks}}{{{this}}}, {{/each}}
-  Remaining Time: {{{remainingTime}}}
-  New Constraints: {{{newConstraints}}}
-  User Goals: {{{userGoals}}}
+  New Constraints/Events: 
+  {{{newConstraints}}}
 
-  Revised Schedule:`, // The prompt should clearly instruct the LLM to use the available tools when appropriate. It doesn't need to force the use of tools, but it should guide the LLM.
+  User's Overall Goals: 
+  {{{userGoals}}}
+
+  Revise the full-day schedule and provide reasoning for your changes.`,
 });
 
 const dynamicallyReworkScheduleFlow = ai.defineFlow(

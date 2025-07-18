@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useTransition, useActionState } from "react";
+import { useState, useTransition } from "react";
 import {
   handleAssessPriority,
   handleGenerateSchedule,
@@ -10,8 +10,6 @@ import {
 } from "@/lib/actions";
 import type { ScheduleTask } from "@/lib/types";
 import type { PriorityItem } from "@/ai/flows/assess-priority";
-import { useAuth } from "@/components/auth-provider";
-
 
 import {
   DndContext,
@@ -74,16 +72,17 @@ function parseSchedule(scheduleText: string): ScheduleTask[] {
   if (!scheduleText) return [];
   return scheduleText
     .split("\n")
-    .filter((line) => line.trim().match(/^\d{1,2}:\d{2}\s?[AP]M/))
+    .filter((line) => line.trim().match(/^(\d{1,2}:\d{2}\s?[AP]M\s?-\s?\d{1,2}:\d{2}\s?[AP]M)|\*/))
     .map((line) => {
       const timeMatch = line.match(/^(\d{1,2}:\d{2}\s?[AP]M\s?-\s?\d{1,2}:\d{2}\s?[AP]M)/);
-      const taskMatch = line.replace(/^(\d{1,2}:\d{2}\s?[AP]M\s?-\s?\d{1,2}:\d{2}\s?[AP]M:?\s?-?\s?)/, '');
+      const taskMatch = line.replace(/^(\d{1,2}:\d{2}\s?[AP]M\s?-\s?\d{1,2}:\d{2}\s?[AP]M:?\s?-?\s?)/, '').replace(/^\*\s*/, '');
       return {
         time: timeMatch ? timeMatch[1] : "All-day",
         task: taskMatch.trim(),
       };
     });
 }
+
 
 function SortablePriorityItem({ item }: { item: PriorityItem }) {
   const {
@@ -133,12 +132,10 @@ export function Dashboard() {
   
   const [priorities, setPriorities] = useState<PriorityItem[]>([]);
   const [reasoning, setReasoning] = useState<string>("");
-  const [schedule, setSchedule] = useState<ScheduleTask[]>([]);
   const [scheduleText, setScheduleText] = useState<string>("");
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [reworkedSchedule, setReworkedSchedule] = useState<{revisedSchedule: string; reasoning: string} | null>(null);
   
   const sensors = useSensors(useSensor(PointerSensor));
 
@@ -159,8 +156,7 @@ export function Dashboard() {
       } else if (result.data) {
         setPriorities(result.data.priorityList);
         setReasoning(result.data.reasoning);
-        setSchedule([]);
-        setReworkedSchedule(null);
+        setScheduleText("");
       }
     });
   };
@@ -186,9 +182,7 @@ export function Dashboard() {
       return;
     }
     setIsGenerating(true);
-    setSchedule([]);
     setScheduleText("");
-    setReworkedSchedule(null);
     const priorityText = priorities.map(p => p.text).join(', ');
     const input = {
       priority: priorityText,
@@ -205,7 +199,6 @@ export function Dashboard() {
       });
     } else if (result.data) {
       setScheduleText(result.data.schedule);
-      setSchedule(parseSchedule(result.data.schedule));
     }
     setIsGenerating(false);
   };
@@ -226,7 +219,7 @@ export function Dashboard() {
       } else {
           toast({
               title: "Synced Successfully!",
-              description: "Your schedule has been added to your Google Calendar.",
+              description: `Synced ${result.data?.syncedEvents.length} event(s) to your Google Calendar.`,
           });
       }
       setIsSyncing(false);
@@ -234,12 +227,15 @@ export function Dashboard() {
 
   const onRework = (formData: FormData) => {
     startReworkTransition(async () => {
+        const editedSchedule = formData.get("editedSchedule") as string;
+        const newConstraints = formData.get("newConstraints") as string;
+
         const input = {
-            originalSchedule: formData.get("originalSchedule") as string,
-            completedTasks: (formData.get("completedTasks") as string).split(',').map(s => s.trim()).filter(Boolean),
-            remainingTime: formData.get("remainingTime") as string,
-            newConstraints: formData.get("newConstraints") as string,
-            userGoals: formData.get("userGoals") as string,
+            originalSchedule: editedSchedule,
+            completedTasks: [], // We let the AI figure this out from the edited schedule
+            remainingTime: "the rest of the day", // Let AI determine this
+            newConstraints: newConstraints,
+            userGoals: userGoals,
         };
         
         const result = await handleReworkSchedule(input);
@@ -249,10 +245,7 @@ export function Dashboard() {
                 title: "Error Reworking Schedule",
                 description: Object.values(result.error).flat().join('\n') || "Please check your input and try again.",
             });
-            setReworkedSchedule(null);
         } else if (result.data) {
-            setReworkedSchedule(result.data);
-            setSchedule(parseSchedule(result.data.revisedSchedule));
             setScheduleText(result.data.revisedSchedule);
             toast({
                 title: "Schedule Reworked!",
@@ -268,12 +261,11 @@ export function Dashboard() {
     setEndTime("");
     setPriorities([]);
     setReasoning("");
-    setSchedule([]);
     setScheduleText("");
-    setReworkedSchedule(null);
   };
 
-  const hasGeneratedSchedule = schedule.length > 0 || isGenerating;
+  const hasGeneratedSchedule = scheduleText.length > 0 || isGenerating;
+  const scheduleTasks = parseSchedule(scheduleText);
 
   return (
     <>
@@ -364,17 +356,12 @@ export function Dashboard() {
               ) : (
                 <Card>
                   <CardContent className="pt-6 space-y-4">
-                    {schedule.map((task, i) => (
-                        <div key={i} className="flex items-center p-3 rounded-lg bg-card-foreground/5">
-                            <div className="flex items-center justify-center h-10 w-10 rounded-full bg-primary/20 text-primary font-bold mr-4 shrink-0">
-                                <CheckCircle size={20}/>
-                            </div>
-                            <div>
-                                <p className="font-semibold">{task.task}</p>
-                                <p className="text-sm text-muted-foreground">{task.time}</p>
-                            </div>
-                        </div>
-                    ))}
+                     <Textarea
+                        name="scheduleText"
+                        className="min-h-[250px] text-base font-mono"
+                        value={scheduleText}
+                        onChange={(e) => setScheduleText(e.target.value)}
+                      />
                   </CardContent>
                   <CardFooter className="gap-2 flex-wrap">
                       <Button onClick={onGenerate} disabled={!priorities.length || isGenerating}>
@@ -394,24 +381,14 @@ export function Dashboard() {
             <div className="grid md:grid-cols-2 gap-8">
                 <section id="rework">
                     <h2 className="text-2xl font-bold flex items-center mb-2"><RefreshCw className="mr-2 text-primary"/> Rework Your Day</h2>
-                    <p className="text-muted-foreground mb-4">Things change. Tell us what you did, and we'll adjust the rest of your day.</p>
+                    <p className="text-muted-foreground mb-4">Edit the schedule text above, then tell the AI what happened. It will adjust the rest of your day.</p>
                     <Card>
                         <form action={onRework}>
                             <CardContent className="pt-6 space-y-4">
-                                <input type="hidden" name="originalSchedule" value={scheduleText} />
-                                <input type="hidden" name="userGoals" value={userGoals} />
-                                
+                                <input type="hidden" name="editedSchedule" value={scheduleText} />
                                 <div>
-                                    <Label htmlFor="remainingTime">Time Remaining Today</Label>
-                                    <Input id="remainingTime" name="remainingTime" placeholder="e.g., 4 hours" required />
-                                </div>
-                                <div>
-                                    <Label htmlFor="completedTasks">Tasks You've Completed (comma-separated)</Label>
-                                    <Input id="completedTasks" name="completedTasks" placeholder="e.g., Morning standup, Drafted email" />
-                                </div>
-                                <div>
-                                    <Label htmlFor="newConstraints">New Constraints or Events</Label>
-                                    <Input id="newConstraints" name="newConstraints" placeholder="e.g., Unexpected meeting at 3 PM" />
+                                    <Label htmlFor="newConstraints">Context for Rework</Label>
+                                    <Input id="newConstraints" name="newConstraints" placeholder="e.g., Lunch ran an hour late." required />
                                 </div>
                             </CardContent>
                             <CardFooter>

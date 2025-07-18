@@ -57,18 +57,13 @@ export async function handleGenerateSchedule(input: GenerateScheduleInput): Prom
 const reworkScheduleSchema = z.object({
   originalSchedule: z.string().min(10, "Please provide the original schedule."),
   completedTasks: z.array(z.string()),
-  remainingTime: z.string().min(1, "Please specify the remaining time."),
-  newConstraints: z.string().optional(),
+  remainingTime: z.string(),
+  newConstraints: z.string().min(1, "Please provide context for the rework."),
   userGoals: z.string().min(10, "Please describe your goals."),
 });
 
 export async function handleReworkSchedule(input: DynamicallyReworkScheduleInput): Promise<{ data?: DynamicallyReworkScheduleOutput, error?: any }> {
-  const rawInput = {
-    ...input,
-    completedTasks: Array.isArray(input.completedTasks) ? input.completedTasks : (input.completedTasks as unknown as string).split(',').map(s => s.trim()).filter(Boolean),
-  };
-
-  const validation = reworkScheduleSchema.safeParse(rawInput);
+  const validation = reworkScheduleSchema.safeParse(input);
 
   if (!validation.success) {
     return { error: validation.error.flatten().fieldErrors };
@@ -87,7 +82,7 @@ const syncToCalendarSchema = z.object({
     schedule: z.string().min(1, "A schedule is required to sync."),
 });
 
-export async function handleSyncToCalendar(input: SyncWithGoogleCalendarInput): Promise<{ data?: SyncWithGoogleCalendarOutput, error?: string }> {
+export async function handleSyncToCalendar(input: Omit<SyncWithGoogleCalendarInput, 'oauthToken'>): Promise<{ data?: SyncWithGoogleCalendarOutput, error?: string }> {
     const validation = syncToCalendarSchema.safeParse(input);
 
     if (!validation.success) {
@@ -104,6 +99,9 @@ export async function handleSyncToCalendar(input: SyncWithGoogleCalendarInput): 
             // obtained from the user's Google Sign-In session.
             oauthToken: "USER_OAUTH_TOKEN_PLACEHOLDER",
         });
+        if (output.errors.length > 0) {
+            return { error: output.errors.join(', ') };
+        }
         return { data: output };
     } catch (e: any) {
         console.error("Error syncing to Google Calendar:", e);
