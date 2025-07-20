@@ -11,8 +11,9 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
-import {parse} from 'date-fns';
+import {parse, format} from 'date-fns';
 import { google } from 'googleapis';
+import { toZonedTime } from 'date-fns-tz';
 // Remove: import { auth } from '@/lib/firebase-admin';
 
 // Helper to create a new calendar and return its ID
@@ -36,7 +37,7 @@ async function createNewCalendar(accessToken: string): Promise<string | null> {
 }
 
 // This tool represents the action of creating an event in a user's Google Calendar.
-async function createCalendarEvent({ calendarId, title, startTime, endTime, accessToken }: { calendarId: string, title: string, startTime: string, endTime: string, accessToken: string }) {
+async function createCalendarEvent({ calendarId, title, startTime, endTime, accessToken, timeZone }: { calendarId: string, title: string, startTime: string, endTime: string, accessToken: string, timeZone: string }) {
     try {
         const oAuth2Client = new google.auth.OAuth2();
         oAuth2Client.setCredentials({ access_token: accessToken });
@@ -45,8 +46,8 @@ async function createCalendarEvent({ calendarId, title, startTime, endTime, acce
             calendarId,
             requestBody: {
                 summary: title,
-                start: { dateTime: new Date(startTime).toISOString() },
-                end: { dateTime: new Date(endTime).toISOString() },
+                start: { dateTime: startTime, timeZone },
+                end: { dateTime: endTime, timeZone },
             },
         });
         return { success: true, eventId: res.data.id };
@@ -126,20 +127,57 @@ async function getEventsForDate({
     return res.data.items || [];
 }
 
-function combineDateAndTime(dateStr: string, timeStr: string): { start: string; end: string } | null {
+// Fetch events from all calendars for a given date
+async function getAllEventsForDate({ date, accessToken }: { date: string; accessToken: string; }) {
+    if (!date || !accessToken) {
+        throw new Error("Missing required parameters for getAllEventsForDate");
+    }
+    const oAuth2Client = new google.auth.OAuth2();
+    oAuth2Client.setCredentials({ access_token: accessToken });
+    const calendar = google.calendar({ version: 'v3', auth: oAuth2Client });
+    // Get all calendars
+    const calendarList = await calendar.calendarList.list();
+    const calendars = calendarList.data.items || [];
+    // Debug: log all calendar summaries and IDs
+    console.log('Fetching events from calendars:', calendars.map(c => ({ summary: c.summary, id: c.id })));
+    const allEvents = [];
+    for (const cal of calendars) {
+        if (!cal.id) continue;
+        // No filter: include all calendars, including 'Synamic AI Schedule'
+        const timeMin = new Date(date + 'T00:00:00').toISOString();
+        const timeMax = new Date(date + 'T23:59:59').toISOString();
+        const res = await calendar.events.list({
+            calendarId: cal.id,
+            timeMin,
+            timeMax,
+            singleEvents: true,
+            orderBy: 'startTime',
+        });
+        if (res.data.items) {
+            allEvents.push(...res.data.items.map(e => ({ ...e, calendarId: cal.id, calendarSummary: cal.summary })));
+        }
+    }
+    return allEvents;
+}
+
+function combineDateAndTime(dateStr: string, timeStr: string, timeZone: string): { start: string; end: string } | null {
     // dateStr: 'YYYY-MM-DD', timeStr: '1:00 PM' or '1:00 PM - 2:00 PM'
     if (!dateStr || !timeStr) return null;
     const [start, end] = timeStr.split('-').map((s: string) => s.trim());
-    function toISO(t: string): string {
+    function toUTCISOStringAggressive(t: string): string {
         const [time, ampm] = t.split(' ');
         let [h, m] = time.split(':');
         let hour = parseInt(h, 10);
         let minute = parseInt(m, 10);
         if (ampm.toUpperCase() === 'PM' && hour < 12) hour += 12;
         if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
-        return new Date(`${dateStr}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00`).toISOString();
+        // Construct a date string in the user's local time zone
+        const localDateStr = `${dateStr}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00`;
+        // Convert to the specified time zone, then to UTC
+        const zoned = toZonedTime(localDateStr, timeZone);
+        return new Date(zoned).toISOString();
     }
-    return { start: toISO(start), end: toISO(end) };
+    return { start: toUTCISOStringAggressive(start), end: toUTCISOStringAggressive(end) };
 }
 
 // Helper to find or create the Synamic AI Schedule calendar
@@ -184,24 +222,35 @@ const syncWithGoogleCalendarFlow = ai.defineFlow(
             return { syncedEvents, errors };
         }
 
+        // Use user's local time zone for Google Calendar event metadata
+        const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
         const targetDates = input.targetDates || [new Date().toISOString().slice(0, 10)];
         for (const date of targetDates) {
             // 1. Read existing events for this date
-            const existingEvents = await getEventsForDate({ calendarId, date, accessToken: input.accessToken });
+            const existingEvents = await getAllEventsForDate({ date, accessToken: input.accessToken });
             for (const event of input.events) {
-                const combined = combineDateAndTime(date, event.startTime + ' - ' + event.endTime);
+                const combined = combineDateAndTime(date, event.startTime + ' - ' + event.endTime, userTimeZone);
                 if (!combined) continue;
                 const { start, end } = combined;
                 // Check for duplicate by title and start time
                 const duplicate = existingEvents.find((e: any) => e.summary === event.title && e.start?.dateTime?.slice(0,16) === start.slice(0,16));
                 if (duplicate) continue; // Skip duplicate
-                await createCalendarEvent({
+                const result = await createCalendarEvent({
                     calendarId,
                     title: event.title,
                     startTime: start,
                     endTime: end,
                     accessToken: input.accessToken,
+                    timeZone: userTimeZone,
                 });
+                if (result.success) {
+                    syncedEvents.push({
+                        title: event.title,
+                        startTime: start,
+                        endTime: end,
+                        eventId: result.eventId,
+                    });
+                }
             }
         }
         return {
